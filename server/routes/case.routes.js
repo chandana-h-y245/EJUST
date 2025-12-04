@@ -11,7 +11,14 @@ router.post(
   allowRoles("LAWYER"),
   async (req, res, next) => {
     try {
-      const { title, description, caseNumber, assignedProfessionals, assignedJudge } = req.body;
+      const {
+        title,
+        description,
+        caseNumber,
+        assignedProfessionals,
+        assignedPublicViewers,
+        assignedJudge,
+      } = req.body;
 
       if (!title || !caseNumber) {
         return res.status(400).json({ message: "title and caseNumber are required" });
@@ -28,6 +35,7 @@ router.post(
         caseNumber,
         createdBy: req.user.id,
         assignedProfessionals: assignedProfessionals || [],
+        assignedPublicViewers: assignedPublicViewers || [],
         assignedJudge: assignedJudge || null,
       });
 
@@ -38,6 +46,7 @@ router.post(
   }
 );
 
+
 // GET /api/cases  (role-dependent view)
 router.get("/", authRequired, async (req, res, next) => {
   try {
@@ -47,14 +56,16 @@ router.get("/", authRequired, async (req, res, next) => {
     let filter = {};
 
     if (role === "LAWYER") {
-      filter.createdBy = userId;
-    } else if (role === "PROFESSIONAL") {
-      filter.assignedProfessionals = userId;
-    } else if (role === "JUDGE") {
-      filter.assignedJudge = userId;
-    } else if (role === "PUBLIC") {
-      filter.status = "CLOSED"; // only public closed cases
-    }
+  filter.createdBy = userId;
+} else if (role === "PROFESSIONAL") {
+  filter.assignedProfessionals = userId;
+} else if (role === "JUDGE") {
+  // judge sees ALL cases
+  // filter = {};   // no extra condition
+} else if (role === "PUBLIC") {
+  filter.assignedPublicViewers = userId;
+}
+
 
     const cases = await Case.find(filter)
       .populate("createdBy", "name role")

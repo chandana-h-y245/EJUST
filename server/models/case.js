@@ -24,7 +24,13 @@ const caseSchema = new mongoose.Schema(
         ref: "Auth",
       },
     ],
-
+    
+assignedPublicViewers: [
+  {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Auth",
+  },
+],
     assignedJudge: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Auth",
