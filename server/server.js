@@ -4,7 +4,9 @@ const cors = require("cors");
 const authRoutes = require("./routes/auth.routes");
 const caseRoutes = require("./routes/case.routes");
 const evidenceRoutes = require("./routes/evidence.routes")
+const userRoutes = require("./routes/user.routes");
 require("dotenv").config();
+
 
 const app = express();
 
@@ -13,6 +15,7 @@ app.use(cors());
 app.use(express.json());
 app.use("/api/cases",caseRoutes);
 app.use("/api/evidences",evidenceRoutes);
+app.use("/api/users",userRoutes);
 
 // DB connect
 

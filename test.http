@@ -1,0 +1,212 @@
+@baseUrl = http://localhost:5000/api
+
+########################################
+# 1. REGISTER USERS (POOL)
+########################################
+
+### Register LAWYER 1
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Lawyer One",
+  "userName": "lawyer1",
+  "email": "lawyer1@example.com",
+  "password": "Password123!",
+  "role": "LAWYER"
+}
+
+### Register LAWYER 2
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Lawyer Two",
+  "userName": "lawyer2",
+  "email": "lawyer2@example.com",
+  "password": "Password123!",
+  "role": "LAWYER"
+}
+
+### Register LAWYER 3
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Lawyer Three",
+  "userName": "lawyer3",
+  "email": "lawyer3@example.com",
+  "password": "Password123!",
+  "role": "LAWYER"
+}
+
+### Register PROFESSIONAL 1
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Forensic Pro",
+  "userName": "pro1",
+  "email": "pro1@example.com",
+  "password": "Password123!",
+  "role": "PROFESSIONAL"
+}
+
+### Register PROFESSIONAL 2
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Forensic Analyst",
+  "userName": "pro2",
+  "email": "pro2@example.com",
+  "password": "Password123!",
+  "role": "PROFESSIONAL"
+}
+
+### Register PROFESSIONAL 3
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Police Inspector",
+  "userName": "pro3",
+  "email": "pro3@example.com",
+  "password": "Password123!",
+  "role": "PROFESSIONAL"
+}
+
+### Register JUDGE 1
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Judge Alpha",
+  "userName": "judge1",
+  "email": "judge1@example.com",
+  "password": "Password123!",
+  "role": "JUDGE"
+}
+
+### Register JUDGE 2
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Judge Beta",
+  "userName": "judge2",
+  "email": "judge2@example.com",
+  "password": "Password123!",
+  "role": "JUDGE"
+}
+
+### Register JUDGE 3
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Judge Gamma",
+  "userName": "judge3",
+  "email": "judge3@example.com",
+  "password": "Password123!",
+  "role": "JUDGE"
+}
+
+### Register PUBLIC 1
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Citizen Viewer",
+  "userName": "public1",
+  "email": "public1@example.com",
+  "password": "Password123!",
+  "role": "PUBLIC"
+}
+
+### Register PUBLIC 2
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Citizen Observer",
+  "userName": "public2",
+  "email": "public2@example.com",
+  "password": "Password123!",
+  "role": "PUBLIC"
+}
+
+### Register PUBLIC 3
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Media Reporter",
+  "userName": "public3",
+  "email": "public3@example.com",
+  "password": "Password123!",
+  "role": "PUBLIC"
+}
+
+########################################
+# 2. LOGIN AS LAWYER 1 (GET TOKEN)
+########################################
+
+### Login LAWYER 1
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "lawyer1@example.com",
+  "password": "Password123!"
+}
+
+# After running this, copy the token from the response
+# and paste it below as lawyerToken:
+
+@lawyerToken = REPLACE_WITH_LAWYER1_JWT
+
+########################################
+# 3. SAMPLE CASES CREATED BY LAWYER 1
+# (You can also create cases from the React UI)
+########################################
+
+### Create Case EJ-2025-001 with some assignments
+POST {{baseUrl}}/cases
+Content-Type: application/json
+Authorization: Bearer {{lawyerToken}}
+
+{
+  "title": "Cyber Fraud – Account Takeover",
+  "caseNumber": "EJ-2025-001",
+  "description": "Unauthorized access to online banking account for testing.",
+  "assignedProfessionals": [],
+  "assignedPublicViewers": [],
+  "assignedJudge": null
+}
+
+### Create Case EJ-2025-002 with some assignments
+# NOTE: For real assignments, replace the IDs below with actual
+# ObjectId values from your users (pro1, public1, judge1, etc.)
+POST {{baseUrl}}/cases
+Content-Type: application/json
+Authorization: Bearer {{lawyerToken}}
+
+{
+  "title": "Evidence Tampering – CCTV Footage",
+  "caseNumber": "EJ-2025-002",
+  "description": "Dispute over authenticity of CCTV footage.",
+  "assignedProfessionals": [],
+  "assignedPublicViewers": [],
+  "assignedJudge": null
+}
+
+PATCH http://localhost:5000/api/cases/PUT_CASE_ID_HERE/assign
+Content-Type: application/json
+Authorization: Bearer YOUR_LAWYER_TOKEN
+
+{
+  "assignedProfessionals": ["<pro1_id>", "<pro2_id>"],
+  "assignedPublicViewers": ["<public1_id>"],
+  "assignedJudge": "<judge1_id>"
+}

@@ -4,7 +4,7 @@ const { authRequired, allowRoles } = require("../middleware/auth");
 
 const router = express.Router();
 
-// POST /api/cases  (LAWYER creates a case)
+// POST /api/cases (LAWYER creates a case)
 router.post(
   "/",
   authRequired,
@@ -21,7 +21,9 @@ router.post(
       } = req.body;
 
       if (!title || !caseNumber) {
-        return res.status(400).json({ message: "title and caseNumber are required" });
+        return res
+          .status(400)
+          .json({ message: "title and caseNumber are required" });
       }
 
       const exists = await Case.findOne({ caseNumber });
@@ -46,8 +48,7 @@ router.post(
   }
 );
 
-
-// GET /api/cases  (role-dependent view)
+// GET /api/cases (role-dependent view)
 router.get("/", authRequired, async (req, res, next) => {
   try {
     const role = req.user.role;
@@ -56,20 +57,19 @@ router.get("/", authRequired, async (req, res, next) => {
     let filter = {};
 
     if (role === "LAWYER") {
-  filter.createdBy = userId;
-} else if (role === "PROFESSIONAL") {
-  filter.assignedProfessionals = userId;
-} else if (role === "JUDGE") {
-  // judge sees ALL cases
-  // filter = {};   // no extra condition
-} else if (role === "PUBLIC") {
-  filter.assignedPublicViewers = userId;
-}
-
+      filter.createdBy = userId;
+    } else if (role === "PROFESSIONAL") {
+      filter.assignedProfessionals = userId;
+    } else if (role === "JUDGE") {
+      // judge sees ALL cases → leave filter as {}
+    } else if (role === "PUBLIC") {
+      filter.assignedPublicViewers = userId;
+    }
 
     const cases = await Case.find(filter)
       .populate("createdBy", "name role")
       .populate("assignedProfessionals", "name role")
+      .populate("assignedPublicViewers", "name role")
       .populate("assignedJudge", "name role");
 
     res.json(cases);
@@ -78,18 +78,21 @@ router.get("/", authRequired, async (req, res, next) => {
   }
 });
 
-// GET /api/cases/:id  (everyone, but PUBLIC limited to CLOSED)
+// GET /api/cases/:id (everyone, but PUBLIC limited to CLOSED)
 router.get("/:id", authRequired, async (req, res, next) => {
   try {
     const theCase = await Case.findById(req.params.id)
       .populate("createdBy", "name role")
       .populate("assignedProfessionals", "name role")
+      .populate("assignedPublicViewers", "name role")
       .populate("assignedJudge", "name role");
 
     if (!theCase) return res.status(404).json({ message: "Case not found" });
 
     if (req.user.role === "PUBLIC" && theCase.status !== "CLOSED") {
-      return res.status(403).json({ message: "Not allowed to view this case" });
+      return res
+        .status(403)
+        .json({ message: "Not allowed to view this case" });
     }
 
     res.json(theCase);
@@ -98,7 +101,7 @@ router.get("/:id", authRequired, async (req, res, next) => {
   }
 });
 
-// PATCH /api/cases/:id/status  (JUDGE only)
+// PATCH /api/cases/:id/status (JUDGE only)
 router.patch(
   "/:id/status",
   authRequired,
@@ -123,5 +126,7 @@ router.patch(
     }
   }
 );
+
+
 
 module.exports = router;

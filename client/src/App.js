@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import axios from "axios";
 import { API_BASE } from "./config";
@@ -32,9 +33,11 @@ function App() {
 
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
-  const loadAssignableUsers = async () => {
+  const loadAssignableUsers = async tokenValue => {
     try {
-      const res = await axios.get("/users/by-role", { headers: authHeaders });
+      const res = await axios.get("/users/by-role", {
+        headers: { Authorization: `Bearer ${tokenValue}` },
+      });
       setProfessionals(res.data.professionals || []);
       setPublicViewers(res.data.publics || []);
       setJudges(res.data.judges || []);
@@ -51,11 +54,15 @@ function App() {
         email: loginEmail,
         password: loginPassword,
       });
-      setToken(res.data.token);
+
+      const tokenValue = res.data.token;
+      setToken(tokenValue);
       setUser(res.data.user);
+
       if (res.data.user.role === "LAWYER") {
-        loadAssignableUsers();
+        await loadAssignableUsers(tokenValue);
       }
+
       setMessage("Login successful");
     } catch (err) {
       setMessage(err.response?.data?.message || "Login failed");
@@ -286,7 +293,10 @@ function App() {
                           value={selectedProfessionals}
                           onChange={e =>
                             setSelectedProfessionals(
-                              Array.from(e.target.selectedOptions, opt => opt.value)
+                              Array.from(
+                                e.target.selectedOptions,
+                                opt => opt.value
+                              )
                             )
                           }
                         >
@@ -309,7 +319,10 @@ function App() {
                           value={selectedPublics}
                           onChange={e =>
                             setSelectedPublics(
-                              Array.from(e.target.selectedOptions, opt => opt.value)
+                              Array.from(
+                                e.target.selectedOptions,
+                                opt => opt.value
+                              )
                             )
                           }
                         >
@@ -354,6 +367,7 @@ function App() {
                           onChange={e => setCaseDescription(e.target.value)}
                         />
                       </div>
+
                       <button className="btn btn-primary" type="submit">
                         Create Case
                       </button>
@@ -374,7 +388,24 @@ function App() {
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
-                            onClick={() => setSelectedCaseId(c._id)}
+                            onClick={() => {
+                              setSelectedCaseId(c._id);
+                              setSelectedProfessionals(
+                                (c.assignedProfessionals || []).map(
+                                  p => p._id || p
+                                )
+                              );
+                              setSelectedPublics(
+                                (c.assignedPublicViewers || []).map(
+                                  p => p._id || p
+                                )
+                              );
+                              setSelectedJudge(
+                                c.assignedJudge?._id ||
+                                  c.assignedJudge ||
+                                  ""
+                              );
+                            }}
                           >
                             Select
                           </button>
