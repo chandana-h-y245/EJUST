@@ -1,5 +1,4 @@
-
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE } from "./config";
 
@@ -18,6 +17,9 @@ function App() {
 
   const [selectedCaseId, setSelectedCaseId] = useState("");
   const [evidenceFile, setEvidenceFile] = useState(null);
+
+  const [evidenceCategory, setEvidenceCategory] = useState("DOCUMENT");
+  const [evidenceDisplayName, setEvidenceDisplayName] = useState("");
 
   const [cases, setCases] = useState([]);
   const [evidences, setEvidences] = useState([]);
@@ -139,6 +141,8 @@ function App() {
       const formData = new FormData();
       formData.append("caseId", selectedCaseId);
       formData.append("file", evidenceFile);
+      formData.append("category", evidenceCategory);
+      formData.append("displayName", evidenceDisplayName);
 
       const res = await axios.post("/evidences", formData, {
         headers: {
@@ -150,6 +154,8 @@ function App() {
       setMessage("Evidence uploaded");
       setEvidences(prev => [...prev, res.data]);
       setEvidenceFile(null);
+      setEvidenceDisplayName("");
+      setEvidenceCategory("DOCUMENT");
     } catch (err) {
       setMessage(err.response?.data?.message || "Failed to upload evidence");
     }
@@ -178,6 +184,18 @@ function App() {
       setMessage(err.response?.data?.message || "Failed to update evidence");
     }
   };
+
+  useEffect(() => {
+    if (!user || !token) return;
+    fetchCases();
+  }, [user, token]);
+
+  useEffect(() => {
+    if (!selectedCaseId) return;
+    fetchEvidences();
+  }, [selectedCaseId]);
+
+  const evidenceLinkBase = API_BASE.replace("/api", "");
 
   return (
     <div className="app-root">
@@ -286,7 +304,9 @@ function App() {
                       </div>
 
                       <div className="form-group">
-                        <label className="form-label">Assign Professionals</label>
+                        <label className="form-label">
+                          Assign Professionals
+                        </label>
                         <select
                           className="select"
                           multiple
@@ -312,7 +332,9 @@ function App() {
                       </div>
 
                       <div className="form-group">
-                        <label className="form-label">Assign Public Viewers</label>
+                        <label className="form-label">
+                          Assign Public Viewers
+                        </label>
                         <select
                           className="select"
                           multiple
@@ -443,6 +465,34 @@ function App() {
                     <h4>Upload Evidence (LAWYER)</h4>
                     <form onSubmit={uploadEvidence}>
                       <div className="form-group">
+                        <label className="form-label">Display Name</label>
+                        <input
+                          className="input"
+                          value={evidenceDisplayName}
+                          onChange={e =>
+                            setEvidenceDisplayName(e.target.value)
+                          }
+                          placeholder="Optional readable name"
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Category</label>
+                        <select
+                          className="select"
+                          value={evidenceCategory}
+                          onChange={e =>
+                            setEvidenceCategory(e.target.value)
+                          }
+                        >
+                          <option value="DOCUMENT">Document</option>
+                          <option value="IMAGE">Image</option>
+                          <option value="VIDEO">Video</option>
+                          <option value="OTHER">Other</option>
+                        </select>
+                      </div>
+
+                      <div className="form-group">
                         <input
                           className="file-input"
                           type="file"
@@ -458,18 +508,28 @@ function App() {
                   <div className="card-section">
                     <h4>Evidence List</h4>
                     <ul className="list">
-                      {evidences.map(ev => (
-                        <li key={ev._id} className="list-item">
-                          <div>
-                            <div>
-                              {ev.originalFileName} — {ev.status}
-                            </div>
-                            <div className="meta">
-                              hash: {ev.sha256Hash?.slice(0, 16)}...
-                            </div>
-                          </div>
-                        </li>
-                      ))}
+                     {evidences.map(ev => (
+  <li key={ev._id} className="list-item">
+    <div>
+      <div>
+        {ev.displayName || ev.originalFileName} — {ev.status} [{ev.category}]
+      </div>
+      <div className="meta">
+        hash: {ev.sha256Hash?.slice(0, 16)}...
+      </div>
+      {ev.fileUrl && (
+        <a
+          href={evidenceLinkBase + ev.fileUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open file
+        </a>
+      )}
+    </div>
+  </li>
+))}
+
                     </ul>
                   </div>
                 </div>
@@ -535,27 +595,27 @@ function App() {
 
                   <ul className="list">
                     {evidences.map(ev => (
-                      <li key={ev._id} className="list-item">
-                        <div>
-                          <div>
-                            {ev.originalFileName} — {ev.status}
-                          </div>
-                          <div className="meta">
-                            hash: {ev.sha256Hash?.slice(0, 16)}...
-                          </div>
-                        </div>
+  <li key={ev._id} className="list-item">
+    <div>
+      <div>
+        {ev.displayName || ev.originalFileName} — {ev.status} [{ev.category}]
+      </div>
+      <div className="meta">
+        hash: {ev.sha256Hash?.slice(0, 16)}...
+      </div>
+      {ev.fileUrl && (
+        <a
+          href={evidenceLinkBase + ev.fileUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open file
+        </a>
+      )}
+    </div>
+  </li>
+))}
 
-                        {ev.status === "UPLOADED" && (
-                          <button
-                            className="btn btn-primary btn-sm"
-                            type="button"
-                            onClick={() => verifyEvidence(ev._id)}
-                          >
-                            Verify
-                          </button>
-                        )}
-                      </li>
-                    ))}
                   </ul>
                 </div>
               </div>
@@ -620,40 +680,27 @@ function App() {
 
                   <ul className="list">
                     {evidences.map(ev => (
-                      <li key={ev._id} className="list-item">
-                        <div>
-                          <div>
-                            {ev.originalFileName} — {ev.status}
-                          </div>
-                          <div className="meta">
-                            hash: {ev.sha256Hash?.slice(0, 16)}...
-                          </div>
-                        </div>
+  <li key={ev._id} className="list-item">
+    <div>
+      <div>
+        {ev.displayName || ev.originalFileName} — {ev.status} [{ev.category}]
+      </div>
+      <div className="meta">
+        hash: {ev.sha256Hash?.slice(0, 16)}...
+      </div>
+      {ev.fileUrl && (
+        <a
+          href={evidenceLinkBase + ev.fileUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open file
+        </a>
+      )}
+    </div>
+  </li>
+))}
 
-                        {ev.status === "VERIFIED" && (
-                          <div style={{ display: "flex", gap: "4px" }}>
-                            <button
-                              className="btn btn-primary btn-sm"
-                              type="button"
-                              onClick={() =>
-                                approveEvidence(ev._id, "APPROVED")
-                              }
-                            >
-                              Approve
-                            </button>
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              type="button"
-                              onClick={() =>
-                                approveEvidence(ev._id, "REJECTED")
-                              }
-                            >
-                              Reject
-                            </button>
-                          </div>
-                        )}
-                      </li>
-                    ))}
                   </ul>
                 </div>
               </div>
@@ -724,11 +771,21 @@ function App() {
                       <li key={ev._id} className="list-item">
                         <div>
                           <div>
-                            {ev.originalFileName} — {ev.status}
+                            {ev.displayName || ev.originalFileName} —{" "}
+                            {ev.status} [{ev.category}]
                           </div>
                           <div className="meta">
                             hash: {ev.sha256Hash?.slice(0, 16)}...
                           </div>
+                          {ev.fileUrl && (
+                            <a
+                              href={evidenceLinkBase + ev.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open file
+                            </a>
+                          )}
                         </div>
                       </li>
                     ))}

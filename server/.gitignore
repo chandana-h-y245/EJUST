@@ -33,7 +33,7 @@ lib-cov/
 
 
 # uploads
-/server/uploads/
+/server/uploads
 
 # postman
 /server/test.http

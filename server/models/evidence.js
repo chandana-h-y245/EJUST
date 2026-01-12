@@ -22,9 +22,19 @@ const evidenceSchema = new mongoose.Schema(
 
     description: { type: String },
 
-    filePath: { type: String, required: true },     // where on disk
+    filePath: { type: String, required: true },   
+    
+    fileUrl: { type: String },  // where on disk
     originalFileName: { type: String, required: true },
+
+    // NEW fields (one mimeType only)
     mimeType: { type: String },
+    category: {
+      type: String,
+      enum: ["DOCUMENT", "IMAGE", "VIDEO", "OTHER"],
+      default: "DOCUMENT",
+    },
+    displayName: { type: String, default: null },
 
     sha256Hash: { type: String, required: true },   // hash of file content
 
@@ -33,6 +43,7 @@ const evidenceSchema = new mongoose.Schema(
       enum: ["UPLOADED", "VERIFIED", "APPROVED", "REJECTED"],
       default: "UPLOADED",
     },
+
 
     verifiedBy: {
       type: mongoose.Schema.Types.ObjectId,
