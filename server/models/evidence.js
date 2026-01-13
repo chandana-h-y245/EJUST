@@ -1,60 +1,26 @@
 const mongoose = require("mongoose");
 
-const evidenceSchema = new mongoose.Schema(
-  {
-    case: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Case",
-      required: true,
-    },
-
-    uploadedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Auth",
-      required: true,
-    },
-
-    type: {
-      type: String,
-      enum: ["DOCUMENT", "IMAGE", "VIDEO", "OTHER"],
-      default: "DOCUMENT",
-    },
-
-    description: { type: String },
-
-    filePath: { type: String, required: true },   
-    
-    fileUrl: { type: String },  // where on disk
-    originalFileName: { type: String, required: true },
-
-    // NEW fields (one mimeType only)
-    mimeType: { type: String },
-    category: {
-      type: String,
-      enum: ["DOCUMENT", "IMAGE", "VIDEO", "OTHER"],
-      default: "DOCUMENT",
-    },
-    displayName: { type: String, default: null },
-
-    sha256Hash: { type: String, required: true },   // hash of file content
-
-    status: {
-      type: String,
-      enum: ["UPLOADED", "VERIFIED", "APPROVED", "REJECTED"],
-      default: "UPLOADED",
-    },
-
-
-    verifiedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Auth",
-    },
-    approvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Auth",
-    },
+const EvidenceSchema = new mongoose.Schema({
+  case: { type: mongoose.Schema.Types.ObjectId, ref: "Case", required: true },
+  uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  description: { type: String },
+  displayName: { type: String },
+  originalFileName: { type: String },
+  fileUrl: { type: String, required: true }, // The URL path for the browser
+  filePath: { type: String, required: true }, // The physical path on the server
+  mimeType: { type: String },
+  sha256Hash: { type: String },
+  category: { 
+    type: String, 
+    enum: ["DOCUMENT", "IMAGE", "VIDEO", "OTHER"], 
+    default: "DOCUMENT" 
   },
-  { timestamps: true }
-);
+  status: { 
+    type: String, 
+    enum: ["UPLOADED", "VERIFIED", "APPROVED", "REJECTED"], 
+    default: "UPLOADED" 
+  },
+  uploadedAt: { type: Date, default: Date.now }
+});
 
-module.exports = mongoose.model("Evidence", evidenceSchema);
+module.exports = mongoose.model("Evidence", EvidenceSchema);

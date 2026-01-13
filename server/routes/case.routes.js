@@ -3,6 +3,8 @@ const Case = require("../models/case");
 const { authRequired, allowRoles } = require("../middleware/auth");
 
 const router = express.Router();
+console.log("case.routes loaded");
+
 
 // POST /api/cases (LAWYER creates a case)
 router.post(
@@ -127,6 +129,50 @@ router.patch(
   }
 );
 
+// PATCH /api/cases/:id/verdict (JUDGE adds verdict / next session / close)
+router.patch(
+  "/:id/verdict",
+  authRequired,
+  allowRoles("JUDGE"),
+  async (req, res, next) => {
+    try {
+      const { verdictText, nextHearingDate, closeCase } = req.body;
 
+      const update = {};
+
+      if (typeof verdictText === "string") {
+        update.verdictText = verdictText;
+      }
+
+      if (nextHearingDate) {
+        update.nextHearingDate = new Date(nextHearingDate);
+      }
+
+      if (closeCase === true) {
+        update.status = "CLOSED";
+        update.closedAt = new Date();
+      }
+
+      const updated = await Case.findByIdAndUpdate(
+        req.params.id,
+        update,
+        { new: true }
+      )
+        .populate("createdBy", "name role")
+        .populate("assignedProfessionals", "name role")
+        .populate("assignedPublicViewers", "name role")
+        .populate("assignedJudge", "name role");
+
+      if (!updated) {
+        return res.status(404).json({ message: "Case not found" });
+      }
+
+      res.json(updated);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 module.exports = router;
+

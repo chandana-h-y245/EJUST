@@ -33,6 +33,13 @@ function App() {
   const [selectedPublics, setSelectedPublics] = useState([]);
   const [selectedJudge, setSelectedJudge] = useState("");
 
+  const [verdictText, setVerdictText] = useState("");
+  const [nextHearingDate, setNextHearingDate] = useState("");
+  const [closeCase, setCloseCase] = useState(false);
+
+  // NEW: control whether closed cases are shown
+  const [showClosed, setShowClosed] = useState(false);
+
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
   const loadAssignableUsers = async tokenValue => {
@@ -72,7 +79,6 @@ function App() {
   };
 
   const fetchCases = async () => {
-    setMessage("");
     try {
       const res = await axios.get("/cases", { headers: authHeaders });
       setCases(res.data);
@@ -117,7 +123,6 @@ function App() {
       setMessage("Select a case first");
       return;
     }
-    setMessage("");
     try {
       const res = await axios.get(
         `/evidences/by-case/${selectedCaseId}`,
@@ -141,7 +146,9 @@ function App() {
       const formData = new FormData();
       formData.append("caseId", selectedCaseId);
       formData.append("file", evidenceFile);
-      formData.append("category", evidenceCategory);
+      
+      // Ensure we are sending the state variable 'evidenceCategory'
+      formData.append("category", evidenceCategory); 
       formData.append("displayName", evidenceDisplayName);
 
       const res = await axios.post("/evidences", formData, {
@@ -151,8 +158,10 @@ function App() {
         },
       });
 
-      setMessage("Evidence uploaded");
+      setMessage("Evidence uploaded successfully");
       setEvidences(prev => [...prev, res.data]);
+      
+      // Reset form
       setEvidenceFile(null);
       setEvidenceDisplayName("");
       setEvidenceCategory("DOCUMENT");
@@ -185,17 +194,150 @@ function App() {
     }
   };
 
+  const submitVerdict = async e => {
+    e.preventDefault();
+    if (!selectedCaseId) {
+      setMessage("Select a case first");
+      return;
+    }
+    setMessage("");
+    try {
+      await axios.patch(
+        `/cases/${selectedCaseId}/verdict`,
+        {
+          verdictText,
+          nextHearingDate: nextHearingDate || null,
+          closeCase,
+        },
+        { headers: authHeaders }
+      );
+      setMessage("Verdict saved");
+      setVerdictText("");
+      setNextHearingDate("");
+      setCloseCase(false);
+      await fetchCases();
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to save verdict");
+    }
+  };
+
   useEffect(() => {
     if (!user || !token) return;
     fetchCases();
-  }, [user, token]);
+  }, [user, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedCaseId) return;
     fetchEvidences();
-  }, [selectedCaseId]);
+  }, [selectedCaseId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const evidenceLinkBase = API_BASE.replace("/api", "");
+
+  const groupedEvidences = {
+    DOCUMENT: evidences.filter(ev => ev.category === "DOCUMENT"),
+    IMAGE: evidences.filter(ev => ev.category === "IMAGE"),
+    VIDEO: evidences.filter(ev => ev.category === "VIDEO"),
+    OTHER: evidences.filter(ev => ev.category === "OTHER"),
+  };
+
+  const statusClass = status => {
+    switch (status) {
+      case "VERIFIED": return "status-verified";
+      case "APPROVED": return "status-approved";
+      case "REJECTED": return "status-rejected";
+      default: return "status-uploaded";
+    }
+  };
+
+  const renderGroupedEvidenceList = (showActions, role) => {
+  const categories = ["DOCUMENT", "IMAGE", "VIDEO", "OTHER"];
+
+  return (
+    <div className="evidence-section">
+      <h3>Case Evidence Repository</h3>
+      
+      {categories.map(cat => {
+        const files = groupedEvidences[cat] || [];
+        return (
+          <div key={cat} style={{ marginBottom: '28px' }}>
+            <div className="category-title">
+              {cat}S ({files.length})
+            </div>
+
+            <div className="evidence-grid">
+              {files.map(ev => (
+                <div key={ev._id} className="evidence-card">
+                  <div className="card-top">
+                    <div className="file-name-text">
+                      {ev.displayName || ev.originalFileName}
+                    </div>
+                    {/* Using your existing statusClass logic */}
+                    <span className={statusClass(ev.status)}>
+                      {ev.status}
+                    </span>
+                  </div>
+
+                  <div className="card-details">
+                    <div>Hash: <code>{ev.sha256Hash?.slice(0, 12)}...</code></div>
+                    <div style={{ marginTop: '4px' }}>
+                      Timestamp: {new Date(ev.createdAt || Date.now()).toLocaleDateString()}
+                    </div>
+                  </div>
+
+                  <div className="card-actions-row">
+                    {ev.fileUrl && (
+                      <button
+                        type="button"
+                        className="btn-view-evidence-card"
+                        onClick={() => {
+                          const fullUrl = evidenceLinkBase + ev.fileUrl;
+                          window.open(fullUrl, "_blank");
+                        }}
+                      >
+                        Open File
+                      </button>
+                    )}
+
+                    {/* Role-based actions */}
+                    {showActions && role === "PROFESSIONAL" && ev.status === "UPLOADED" && (
+                      <button className="btn btn-primary btn-sm" onClick={() => verifyEvidence(ev._id)}>
+                        Verify
+                      </button>
+                    )}
+
+                    {showActions && role === "JUDGE" && ev.status === "VERIFIED" && (
+                      <div style={{ display: "flex", gap: "4px" }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => approveEvidence(ev._id, "APPROVED")}>
+                          Approve
+                        </button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => approveEvidence(ev._id, "REJECTED")}>
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {files.length === 0 && (
+              <div className="meta" style={{ padding: '8px', border: '1px dashed #374151', borderRadius: '8px' }}>
+                No {cat.toLowerCase()} evidence found.
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+  const selectedCase = cases.find(c => c._id === selectedCaseId);
+
+  // filtered lists: by default hide CLOSED unless showClosed is true
+  const visibleCases = cases.filter(
+    c => showClosed || c.status !== "CLOSED"
+  );
 
   return (
     <div className="app-root">
@@ -233,7 +375,6 @@ function App() {
           </div>
         )}
 
-        {/* LOGIN */}
         {!user && (
           <div className="card">
             <h3>Login</h3>
@@ -265,7 +406,6 @@ function App() {
           </div>
         )}
 
-        {/* AFTER LOGIN */}
         {user && (
           <>
             <div className="card" style={{ marginBottom: "12px" }}>
@@ -274,23 +414,30 @@ function App() {
               </p>
             </div>
 
-            {/* LAWYER DASHBOARD */}
             {user.role === "LAWYER" && (
               <div className="app-grid">
-                {/* Cases card */}
-                <div className="card">
+                <div className="card card-lawyer">
                   <div className="card-header-row">
                     <h3>Cases</h3>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      type="button"
-                      onClick={fetchCases}
-                    >
-                      Load My Cases
-                    </button>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        type="button"
+                        onClick={fetchCases}
+                      >
+                        Load My Cases
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        type="button"
+                        onClick={() => setShowClosed(s => !s)}
+                      >
+                        {showClosed ? "Hide closed cases" : "Show closed cases"}
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="card-section">
+                  <div className="card-section lawyer-assign-section">
                     <h4>Create Case (LAWYER)</h4>
                     <form onSubmit={createCase}>
                       <div className="form-group">
@@ -303,10 +450,8 @@ function App() {
                         />
                       </div>
 
-                      <div className="form-group">
-                        <label className="form-label">
-                          Assign Professionals
-                        </label>
+                      <div className="form-group lawyer-assign-block">
+                        <label className="form-label">Assign Professionals</label>
                         <select
                           className="select"
                           multiple
@@ -331,10 +476,8 @@ function App() {
                         </p>
                       </div>
 
-                      <div className="form-group">
-                        <label className="form-label">
-                          Assign Public Viewers
-                        </label>
+                      <div className="form-group lawyer-assign-block">
+                        <label className="form-label">Assign Public Viewers</label>
                         <select
                           className="select"
                           multiple
@@ -356,7 +499,7 @@ function App() {
                         </select>
                       </div>
 
-                      <div className="form-group">
+                      <div className="form-group lawyer-assign-block">
                         <label className="form-label">Assign Judge</label>
                         <select
                           className="select"
@@ -399,7 +542,7 @@ function App() {
                   <div className="card-section">
                     <h4>Your Cases</h4>
                     <ul className="list">
-                      {cases.map(c => (
+                      {visibleCases.map(c => (
                         <li
                           key={c._id}
                           className={
@@ -435,6 +578,15 @@ function App() {
                             <div>
                               {c.caseNumber} — {c.title} ({c.status})
                             </div>
+                            {c.verdictText && (
+                              <div className="meta">Verdict: {c.verdictText}</div>
+                            )}
+                            {c.nextHearingDate && (
+                              <div className="meta">
+                                Next session:{" "}
+                                {new Date(c.nextHearingDate).toLocaleString()}
+                              </div>
+                            )}
                             <div className="meta">ID: {c._id}</div>
                           </div>
                         </li>
@@ -443,7 +595,6 @@ function App() {
                   </div>
                 </div>
 
-                {/* Evidence card */}
                 <div className="card">
                   <div className="card-header-row">
                     <h3>Evidence</h3>
@@ -505,55 +656,37 @@ function App() {
                     </form>
                   </div>
 
-                  <div className="card-section">
-                    <h4>Evidence List</h4>
-                    <ul className="list">
-                     {evidences.map(ev => (
-  <li key={ev._id} className="list-item">
-    <div>
-      <div>
-        {ev.displayName || ev.originalFileName} — {ev.status} [{ev.category}]
-      </div>
-      <div className="meta">
-        hash: {ev.sha256Hash?.slice(0, 16)}...
-      </div>
-      {ev.fileUrl && (
-        <a
-          href={evidenceLinkBase + ev.fileUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open file
-        </a>
-      )}
-    </div>
-  </li>
-))}
-
-                    </ul>
-                  </div>
+                  {renderGroupedEvidenceList(false, "LAWYER")}
                 </div>
               </div>
             )}
 
-            {/* PROFESSIONAL DASHBOARD */}
             {user.role === "PROFESSIONAL" && (
               <div className="card">
                 <div className="card-header-row">
                   <h3>Assigned Cases & Evidence (PROFESSIONAL)</h3>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={fetchCases}
-                  >
-                    Load My Cases
-                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={fetchCases}
+                    >
+                      Load My Cases
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => setShowClosed(s => !s)}
+                    >
+                      {showClosed ? "Hide closed cases" : "Show closed cases"}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="card-section">
                   <h4>Cases</h4>
                   <ul className="list">
-                    {cases.map(c => (
+                    {visibleCases.map(c => (
                       <li
                         key={c._id}
                         className={
@@ -572,6 +705,15 @@ function App() {
                           <div>
                             {c.caseNumber} — {c.title} ({c.status})
                           </div>
+                          {c.verdictText && (
+                            <div className="meta">Verdict: {c.verdictText}</div>
+                          )}
+                          {c.nextHearingDate && (
+                            <div className="meta">
+                              Next session:{" "}
+                              {new Date(c.nextHearingDate).toLocaleString()}
+                            </div>
+                          )}
                           <div className="meta">ID: {c._id}</div>
                         </div>
                       </li>
@@ -579,66 +721,40 @@ function App() {
                   </ul>
                 </div>
 
-                <div className="card-section">
-                  <h4>Evidence for Selected Case</h4>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={fetchEvidences}
-                    disabled={!selectedCaseId}
-                  >
-                    Load Evidence
-                  </button>
-                  <p className="meta">
-                    Selected case ID: {selectedCaseId || "None"}
-                  </p>
+                <p className="meta">
+                  Selected case ID: {selectedCaseId || "None"}
+                </p>
 
-                  <ul className="list">
-                    {evidences.map(ev => (
-  <li key={ev._id} className="list-item">
-    <div>
-      <div>
-        {ev.displayName || ev.originalFileName} — {ev.status} [{ev.category}]
-      </div>
-      <div className="meta">
-        hash: {ev.sha256Hash?.slice(0, 16)}...
-      </div>
-      {ev.fileUrl && (
-        <a
-          href={evidenceLinkBase + ev.fileUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open file
-        </a>
-      )}
-    </div>
-  </li>
-))}
-
-                  </ul>
-                </div>
+                {renderGroupedEvidenceList(true, "PROFESSIONAL")}
               </div>
             )}
 
-            {/* JUDGE DASHBOARD */}
             {user.role === "JUDGE" && (
               <div className="card">
                 <div className="card-header-row">
                   <h3>Cases & Evidence (JUDGE)</h3>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={fetchCases}
-                  >
-                    Load My Cases
-                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={fetchCases}
+                    >
+                      Load My Cases
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => setShowClosed(s => !s)}
+                    >
+                      {showClosed ? "Hide closed cases" : "Show closed cases"}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="card-section">
                   <h4>Cases</h4>
                   <ul className="list">
-                    {cases.map(c => (
+                    {visibleCases.map(c => (
                       <li
                         key={c._id}
                         className={
@@ -649,7 +765,18 @@ function App() {
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"
-                          onClick={() => setSelectedCaseId(c._id)}
+                          onClick={() => {
+                            setSelectedCaseId(c._id);
+                            setVerdictText(c.verdictText || "");
+                            setNextHearingDate(
+                              c.nextHearingDate
+                                ? new Date(c.nextHearingDate)
+                                    .toISOString()
+                                    .slice(0, 16)
+                                : ""
+                            );
+                            setCloseCase(c.status === "CLOSED");
+                          }}
                         >
                           Select
                         </button>
@@ -657,6 +784,15 @@ function App() {
                           <div>
                             {c.caseNumber} — {c.title} ({c.status})
                           </div>
+                          {c.verdictText && (
+                            <div className="meta">Verdict: {c.verdictText}</div>
+                          )}
+                          {c.nextHearingDate && (
+                            <div className="meta">
+                              Next session:{" "}
+                              {new Date(c.nextHearingDate).toLocaleString()}
+                            </div>
+                          )}
                           <div className="meta">ID: {c._id}</div>
                         </div>
                       </li>
@@ -664,69 +800,84 @@ function App() {
                   </ul>
                 </div>
 
-                <div className="card-section">
-                  <h4>Evidence for Selected Case</h4>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={fetchEvidences}
-                    disabled={!selectedCaseId}
-                  >
-                    Load Evidence
-                  </button>
-                  <p className="meta">
-                    Selected case ID: {selectedCaseId || "None"}
-                  </p>
+                <p className="meta">
+                  Selected case ID: {selectedCaseId || "None"}
+                </p>
 
-                  <ul className="list">
-                    {evidences.map(ev => (
-  <li key={ev._id} className="list-item">
-    <div>
-      <div>
-        {ev.displayName || ev.originalFileName} — {ev.status} [{ev.category}]
-      </div>
-      <div className="meta">
-        hash: {ev.sha256Hash?.slice(0, 16)}...
-      </div>
-      {ev.fileUrl && (
-        <a
-          href={evidenceLinkBase + ev.fileUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open file
-        </a>
-      )}
-    </div>
-  </li>
-))}
+                {selectedCase && (
+                  <div className="card-section">
+                    <h4>Set Verdict / Next Session</h4>
+                    <form onSubmit={submitVerdict}>
+                      <div className="form-group">
+                        <label className="form-label">Verdict</label>
+                        <textarea
+                          className="textarea"
+                          value={verdictText}
+                          onChange={e => setVerdictText(e.target.value)}
+                          placeholder="Enter final verdict or notes"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Next Hearing</label>
+                        <input
+                          className="input"
+                          type="datetime-local"
+                          value={nextHearingDate}
+                          onChange={e => setNextHearingDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">
+                          <input
+                            type="checkbox"
+                            checked={closeCase}
+                            onChange={e => setCloseCase(e.target.checked)}
+                            style={{ marginRight: 6 }}
+                          />
+                          Close case now (status = CLOSED)
+                        </label>
+                      </div>
+                      <button className="btn btn-primary" type="submit">
+                        Save Verdict
+                      </button>
+                    </form>
+                  </div>
+                )}
 
-                  </ul>
-                </div>
+                {renderGroupedEvidenceList(true, "JUDGE")}
               </div>
             )}
 
-            {/* PUBLIC DASHBOARD */}
             {user.role === "PUBLIC" && (
               <div className="card">
                 <div className="card-header-row">
                   <h3>Public View</h3>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={fetchCases}
-                  >
-                    Load Public Cases
-                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={fetchCases}
+                    >
+                      Load Public Cases
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => setShowClosed(s => !s)}
+                    >
+                      {showClosed ? "Hide closed cases" : "Show closed cases"}
+                    </button>
+                  </div>
                 </div>
                 <p className="meta">
-                  You can only see CLOSED cases and their evidence status.
+                  You can only see pending cases, their current status, and next
+                  session details.
                 </p>
 
                 <div className="card-section">
                   <h4>Cases</h4>
                   <ul className="list">
-                    {cases.map(c => (
+                    {visibleCases.map(c => (
                       <li
                         key={c._id}
                         className={
@@ -745,6 +896,12 @@ function App() {
                           <div>
                             {c.caseNumber} — {c.title} ({c.status})
                           </div>
+                          {c.nextHearingDate && (
+                            <div className="meta">
+                              Next session:{" "}
+                              {new Date(c.nextHearingDate).toLocaleString()}
+                            </div>
+                          )}
                           <div className="meta">ID: {c._id}</div>
                         </div>
                       </li>
@@ -752,45 +909,28 @@ function App() {
                   </ul>
                 </div>
 
-                <div className="card-section">
-                  <h4>Evidence for Selected Case</h4>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    type="button"
-                    onClick={fetchEvidences}
-                    disabled={!selectedCaseId}
-                  >
-                    Load Evidence
-                  </button>
-                  <p className="meta">
-                    Selected case ID: {selectedCaseId || "None"}
-                  </p>
+                <p className="meta">
+                  Selected case ID: {selectedCaseId || "None"}
+                </p>
 
-                  <ul className="list">
-                    {evidences.map(ev => (
-                      <li key={ev._id} className="list-item">
-                        <div>
-                          <div>
-                            {ev.displayName || ev.originalFileName} —{" "}
-                            {ev.status} [{ev.category}]
-                          </div>
-                          <div className="meta">
-                            hash: {ev.sha256Hash?.slice(0, 16)}...
-                          </div>
-                          {ev.fileUrl && (
-                            <a
-                              href={evidenceLinkBase + ev.fileUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open file
-                            </a>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                {selectedCase && (
+                  <div className="case-detail-panel">
+                    <h4>Case Details</h4>
+                    <p>
+                      <b>Title:</b> {selectedCase.title}
+                    </p>
+                    <p>
+                      <b>Status:</b> {selectedCase.status}</p>
+                    {selectedCase.nextHearingDate && (
+                      <p>
+                        <b>Next session:</b>{" "}
+                        {new Date(
+                          selectedCase.nextHearingDate
+                        ).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </>
