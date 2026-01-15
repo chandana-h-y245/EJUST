@@ -34,14 +34,11 @@ function App() {
   const [selectedProfessionals, setSelectedProfessionals] = useState([]);
   const [selectedPublics, setSelectedPublics] = useState([]);
   const [selectedLawyers, setSelectedLawyers] = useState([]);
-  const [selectedJudge, setSelectedJudge] = useState("");
 
   const [verdictText, setVerdictText] = useState("");
+  const [verdictStatus, setVerdictStatus] = useState("OPEN"); // Added for Management Console
   const [nextHearingDate, setNextHearingDate] = useState("");
   const [closeCase, setCloseCase] = useState(false);
-
-  // NEW: control whether closed cases are shown
-  const [showClosed, setShowClosed] = useState(false);
 
   // Profile State
   const [profile, setProfile] = useState(null);
@@ -56,9 +53,29 @@ function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [verificationCommentsMap, setVerificationCommentsMap] = useState({});
   const [expandedEvidenceId, setExpandedEvidenceId] = useState("");
+  const [selectedEvidence, setSelectedEvidence] = useState(null); // Master-Detail State
+  const [activeSubTab, setActiveSubTab] = useState("DETAILS"); // Sidebar State for Case Detail
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isTimelineOpen, setIsTimelineOpen] = useState(false); // Collapsible Timeline State
+  const [completedDeadlines, setCompletedDeadlines] = useState(() => {
+    // Initialize from local storage
+    try {
+      const saved = localStorage.getItem("completedDeadlines");
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
+  });
 
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "N/A";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "N/A";
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
 
   const loadAssignableUsers = async tokenValue => {
     try {
@@ -311,11 +328,11 @@ function App() {
     }
   };
 
-  const verifyEvidence = async id => {
+  const verifyEvidence = async (id, decision = "VERIFIED") => {
     try {
       const comment = verificationCommentsMap[id] || "";
-      await axios.patch(`/evidences/${id}/verify`, { comments: comment }, { headers: authHeaders });
-      setMessage("Evidence verified with comments");
+      await axios.patch(`/evidences/${id}/verify`, { comments: comment, decision }, { headers: authHeaders });
+      setMessage(`Evidence ${decision.toLowerCase()} with comments`);
 
       // Clear specific comment from map
       setVerificationCommentsMap(prev => {
@@ -323,6 +340,9 @@ function App() {
         delete next[id];
         return next;
       });
+
+      // Auto-close expander
+      setExpandedEvidenceId("");
 
       if (selectedCaseId) fetchEvidences();
     } catch (err) {
@@ -339,6 +359,7 @@ function App() {
         { headers: authHeaders }
       );
       setMessage(`Evidence ${decision.toLowerCase()}`);
+      setExpandedEvidenceId(""); // Auto-close expander
       if (selectedCaseId) fetchEvidences();
     } catch (err) {
       setMessage(err.response?.data?.message || "Failed to update evidence");
@@ -358,14 +379,14 @@ function App() {
         {
           verdictText,
           nextHearingDate: nextHearingDate || null,
-          closeCase,
+          status: verdictStatus, // Explicit status (OPEN/CLOSED)
         },
         { headers: authHeaders }
       );
       setMessage("Verdict saved");
       setVerdictText("");
       setNextHearingDate("");
-      setCloseCase(false);
+      setVerdictStatus("OPEN"); // Reset dropdown
       await fetchCases();
     } catch (err) {
       setMessage(err.response?.data?.message || "Failed to save verdict");
@@ -378,11 +399,17 @@ function App() {
     if (user.role === "JUDGE") {
       loadAssignableUsers(token);
     }
+    // Default Timeline State: Closed for Professionals, Open for others
+    setIsTimelineOpen(user.role !== "PROFESSIONAL");
   }, [user, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!selectedCaseId) return;
+    if (!selectedCaseId) {
+      setSelectedEvidence(null);
+      return;
+    }
     fetchEvidences();
+    setSelectedEvidence(null); // Clear preview on case load/switch
   }, [selectedCaseId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const evidenceLinkBase = API_BASE.replace("/api", "");
@@ -415,205 +442,218 @@ function App() {
 
     return (
       <div className="timeline-section card">
-        <h3>Interactive Case Progression</h3>
-        <div className="timeline-container">
-          <div className="timeline-line"></div>
-          {theCase.timeline.map((event, index) => {
-            const isLatest = index === 0; // Assuming timeline is unshifted (descending)
-            return (
-              <div key={event._id || index} className={`timeline-item ${isLatest ? 'latest' : ''}`}>
-                <div className="timeline-dot">
-                  {event.status === 'CLOSED' ? '⚖️' : (event.status === 'UNDER_REVIEW' ? '🔍' : '📝')}
-                </div>
-                <div className="timeline-content">
-                  <div className="timeline-date">
-                    {new Date(event.date || Date.now()).toLocaleString([], { dateStyle: 'long', timeStyle: 'short' })}
-                  </div>
-                  <div className="timeline-status">
-                    {event.status || "STATUS UPDATE"}
-                    {isLatest && <span className="status-pill status-info" style={{ fontSize: '0.6rem', padding: '2px 6px' }}>LATEST</span>}
-                  </div>
-                  {event.verdict && (
-                    <div className="timeline-verdict">
-                      "{event.verdict}"
+        <h3
+          onClick={() => setIsTimelineOpen(!isTimelineOpen)}
+          style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        >
+          Case History
+          <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>{isTimelineOpen ? '▼' : '▶'}</span>
+        </h3>
+        {isTimelineOpen && (
+          <div className="timeline-container">
+            <div className="timeline-line"></div>
+            {[...theCase.timeline]
+              .sort((a, b) => new Date(b.date) - new Date(a.date))
+              .map((event, index) => {
+                const isLatest = index === 0; // Correctly identifies latest after sort
+                return (
+                  <div key={event._id || index} className={`timeline-item ${isLatest ? 'latest' : ''}`}>
+                    <div className="timeline-dot" style={{ background: isLatest ? 'var(--primary)' : 'var(--border-muted)', border: '2px solid var(--surface-deep)' }}>
                     </div>
-                  )}
-                  {event.nextHearing && (
-                    <div className="timeline-next">
-                      📅 Next Hearing: {new Date(event.nextHearing).toLocaleDateString()}
+                    <div className="timeline-content">
+                      <div className="timeline-date">
+                        {formatDate(event.date || Date.now())} {new Date(event.date || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      <div className="timeline-status">
+                        {event.status || "STATUS UPDATE"}
+                        {isLatest && <span className="status-pill status-info" style={{ fontSize: '0.6rem', padding: '2px 6px' }}>LATEST</span>}
+                      </div>
+                      {event.verdict && (
+                        <div className="timeline-verdict">
+                          "{event.verdict}"
+                        </div>
+                      )}
+                      {event.nextHearing && (
+                        <div className="timeline-next">
+                          📅 Next Hearing: {formatDate(event.nextHearing)}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
     );
   };
 
   const renderGroupedEvidenceList = (showActions, role, isClosed = false) => {
+    // Flatten and Sort Evidences: Latest First
+    const allEvidences = [...evidences].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    // Group by Category (for the list view headers if needed, OR just linear list with badges)
     const categories = ["DOCUMENT", "IMAGE", "VIDEO", "OTHER"];
 
     return (
       <div className="evidence-section">
         <h3>Case Evidence Repository</h3>
 
-        {categories.map(cat => {
-          const files = groupedEvidences[cat] || [];
-          return (
-            <div key={cat} style={{ marginBottom: '28px' }}>
-              <div className="category-title">
-                {cat}S ({files.length})
-              </div>
+        <div className="evidence-layout-container">
+          {/* LEFT COLUMN: EVIDENCE LIST */}
+          <div className="evidence-list-column">
+            {categories.map(cat => {
+              const files = groupedEvidences[cat] || [];
+              if (files.length === 0) return null;
 
-              <div className="evidence-grid">
-                {files.map(ev => {
-                  const isExpanded = expandedEvidenceId === ev._id;
+              return (
+                <div key={cat}>
+                  <div className="category-title">{cat}S ({files.length})</div>
+                  <div className="evidence-grid" style={{ gridTemplateColumns: '1fr' }}> {/* Stack cards vertically in list col */}
+                    {files.map(ev => {
+                      const isSelected = selectedEvidence?._id === ev._id;
 
-                  return (
-                    <div
-                      key={ev._id}
-                      className={`evidence-card ${isExpanded ? 'expanded' : ''}`}
-                      onClick={() => !isExpanded && setExpandedEvidenceId(ev._id)}
-                    >
-                      {isExpanded && (
-                        <button
-                          className="close-expansion-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedEvidenceId("");
-                          }}
+                      return (
+                        <div
+                          key={ev._id}
+                          className={`evidence-card ${isSelected ? 'selected' : ''}`}
+                          onClick={() => setSelectedEvidence(ev)}
+                          style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }}
                         >
-                          ×
-                        </button>
-                      )}
-
-                      <div className="card-top">
-                        <div className="file-name-text">
-                          {ev.displayName || ev.originalFileName}
-                        </div>
-                        <span className={statusClass(ev.status)}>
-                          {ev.status}
-                        </span>
-                      </div>
-
-                      <div className="card-details">
-                        <div>Hash: <code>{ev.sha256Hash?.slice(0, 12)}...</code></div>
-                        <div style={{ marginTop: '4px' }}>
-                          Timestamp: {new Date(ev.createdAt || Date.now()).toLocaleDateString()}
-                        </div>
-                        {ev.professionalComments && !isExpanded && (
-                          <div style={{ marginTop: '8px', padding: '8px', background: '#f1f5f9', borderRadius: '4px', borderLeft: '3px solid #60a5fa', fontSize: '0.8rem' }}>
-                            <div className="meta" style={{ fontSize: '0.65rem', marginBottom: '2px', color: '#60a5fa' }}>PRO COMMENTS:</div>
-                            {ev.professionalComments.length > 50 ? ev.professionalComments.slice(0, 50) + "..." : ev.professionalComments}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* EXPANSION CONTENT */}
-                      {isExpanded && (
-                        <div className="expansion-reveal" onClick={(e) => e.stopPropagation()}>
-                          {/* PREVIEW BOX */}
-                          <div className="preview-box">
-                            {cat === "IMAGE" && (
-                              <img src={evidenceLinkBase + ev.fileUrl} alt="Preview" />
-                            )}
-                            {cat === "VIDEO" && (
-                              <video src={evidenceLinkBase + ev.fileUrl} controls />
-                            )}
-                            {(cat === "DOCUMENT" || cat === "OTHER") && (
-                              <div className="not-previewable">
-                                <p style={{ fontSize: '1.5rem', marginBottom: '10px' }}>📄</p>
-                                <p>This file type cannot be previewed directly.</p>
-                                <button
-                                  className="btn btn-primary"
-                                  onClick={() => window.open(evidenceLinkBase + ev.fileUrl, "_blank")}
-                                  style={{ marginTop: '15px' }}
-                                >
-                                  Download / Open File
-                                </button>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* ACTION AREA */}
-                          <div className="action-form-container">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
-                              <div>
-                                <h4>Evidence Information</h4>
-                                <p className="meta">{ev.originalFileName} ({ev.mimeType})</p>
-                              </div>
-                              {ev.fileUrl && (cat === "IMAGE" || cat === "VIDEO") && (
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => window.open(evidenceLinkBase + ev.fileUrl, "_blank")}
-                                >
-                                  Open Original
-                                </button>
-                              )}
+                          {/* Row 1: Title & Status */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-heading)' }}>
+                              {ev.displayName || ev.originalFileName}
                             </div>
+                            <span className={statusClass(ev.status)} style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
+                              {ev.status}
+                            </span>
+                          </div>
 
-                            {ev.professionalComments && (
-                              <div style={{ marginBottom: '20px', padding: '15px', background: '#f8fafc', borderLeft: '4px solid #3b82f6', borderRadius: '4px' }}>
-                                <h4 style={{ color: '#1e3a8a', fontSize: '0.8rem' }}>PROFESSIONAL VERIFICATION COMMENTS</h4>
-                                <p style={{ margin: '5px 0', lineHeight: '1.5' }}>{ev.professionalComments}</p>
-                              </div>
-                            )}
-
-                            {/* PROFESSIONAL ACTION */}
-                            {showActions && !isClosed && role === "PROFESSIONAL" && ev.status === "UPLOADED" && (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                <h4>Verify Evidence</h4>
-                                <textarea
-                                  className="textarea"
-                                  style={{ minHeight: '100px' }}
-                                  placeholder="Enter your verification notes here. These will be visible to the judge..."
-                                  value={verificationCommentsMap[ev._id] || ""}
-                                  onChange={(e) => setVerificationCommentsMap(prev => ({ ...prev, [ev._id]: e.target.value }))}
-                                />
-                                <button className="btn btn-primary" onClick={() => verifyEvidence(ev._id)}>
-                                  Submit Verification
-                                </button>
-                              </div>
-                            )}
-
-                            {/* JUDGE ACTION */}
-                            {showActions && !isClosed && role === "JUDGE" && ev.status === "VERIFIED" && (
-                              <div>
-                                <h4>Judge Verdict</h4>
-                                <div style={{ display: "flex", gap: "10px" }}>
-                                  <button className="btn btn-primary" onClick={() => approveEvidence(ev._id, "APPROVED")}>
-                                    Approve for Evidence
-                                  </button>
-                                  <button className="btn btn-secondary" onClick={() => approveEvidence(ev._id, "REJECTED")}>
-                                    Reject / Dismiss
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {ev.status !== "UPLOADED" && ev.status !== "VERIFIED" && (
-                              <div className={`status status-info`} style={{ margin: 0 }}>
-                                This evidence has been <b>{ev.status}</b>. No further actions required.
-                              </div>
-                            )}
+                          {/* Row 2: Metadata */}
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-subtle)', fontFamily: 'monospace', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                            <span>{ev.category}</span>
+                            <span style={{ color: 'var(--border-muted)' }}>|</span>
+                            <span>{ev.sha256Hash ? ev.sha256Hash.substring(0, 12) + '...' : 'No Hash'}</span>
+                            <span style={{ color: 'var(--border-muted)' }}>|</span>
+                            <span>{formatDate(ev.createdAt || Date.now())}</span>
                           </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {files.length === 0 && (
-                <div className="meta" style={{ padding: '8px', border: '1px dashed #374151', borderRadius: '8px' }}>
-                  No {cat.toLowerCase()} evidence found.
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
+              );
+            })}
+            {allEvidences.length === 0 && <p className="meta">No evidence uploaded yet.</p>}
+          </div>
+
+          {/* RIGHT COLUMN: PREVIEW PANEL */}
+          <div className="evidence-preview-pane">
+            {selectedEvidence ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-muted)', paddingBottom: '16px' }}>
+                  <h4 style={{ margin: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginRight: '20px' }}>
+                    {selectedEvidence.displayName || selectedEvidence.originalFileName}
+                  </h4>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => window.open(evidenceLinkBase + selectedEvidence.fileUrl, "_blank")}
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      Download File
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setSelectedEvidence(null)}
+                      style={{ padding: '4px 10px', fontSize: '1.2rem', lineHeight: 1 }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+
+                {/* PREVIEW BOX */}
+                <div className="preview-box" style={{ minHeight: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.2)', margin: '20px 0', border: '1px solid var(--border-muted)', borderRadius: '4px' }}>
+                  {selectedEvidence.category === "IMAGE" && (
+                    <img src={evidenceLinkBase + selectedEvidence.fileUrl} alt="Preview" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                  )}
+                  {selectedEvidence.category === "VIDEO" && (
+                    <video src={evidenceLinkBase + selectedEvidence.fileUrl} controls style={{ maxHeight: '100%', maxWidth: '100%' }} />
+                  )}
+                  {(selectedEvidence.category === "DOCUMENT" || selectedEvidence.category === "OTHER") && (
+                    <div className="not-previewable" style={{ textAlign: 'center', color: 'var(--text-subtle)' }}>
+                      <p>Preview not available for this file type.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* METADATA & ACTIONS */}
+                <div className="action-form-container" style={{ padding: 0, background: 'transparent' }}>
+                  <div style={{ marginBottom: '20px', display: 'flex', gap: '24px', fontSize: '0.9rem', color: 'var(--text-subtle)', borderBottom: '1px solid var(--border-muted)', paddingBottom: '10px' }}>
+                    <span><strong>Type:</strong> {selectedEvidence.mimeType}</span>
+                    <span style={{ fontFamily: 'monospace' }}><strong>Hash:</strong> {selectedEvidence.sha256Hash?.slice(0, 12)}...</span>
+                  </div>
+
+                  {selectedEvidence.professionalComments && (
+                    <div style={{ marginBottom: '20px', padding: '16px', background: 'rgba(59, 130, 246, 0.05)', borderLeft: '4px solid #3b82f6', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.1)', borderLeftWidth: '4px' }}>
+                      <h4 style={{ color: '#60a5fa', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>Professional Verification</h4>
+                      <p style={{ margin: '0', lineHeight: '1.6', color: 'var(--text-heading)', fontSize: '0.9rem' }}>"{selectedEvidence.professionalComments}"</p>
+                    </div>
+                  )}
+
+                  {/* ROLE SPECIFIC ACTIONS */}
+
+                  {/* PROFESSIONAL */}
+                  {showActions && !isClosed && role === "PROFESSIONAL" && selectedEvidence.status === "UPLOADED" && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                      <h4 style={{ color: 'var(--text-heading)' }}>Verify Evidence</h4>
+                      <textarea
+                        className="textarea"
+                        style={{ minHeight: '100px' }}
+                        placeholder="Verification notes..."
+                        value={verificationCommentsMap[selectedEvidence._id] || ""}
+                        onChange={(e) => setVerificationCommentsMap(prev => ({ ...prev, [selectedEvidence._id]: e.target.value }))}
+                      />
+                      <button className="btn btn-primary" onClick={() => {
+                        verifyEvidence(selectedEvidence._id, "VERIFIED");
+                        setSelectedEvidence(null);
+                      }}>
+                        Verify Findings
+                      </button>
+                    </div>
+                  )}
+
+                  {/* JUDGE */}
+                  {showActions && !isClosed && role === "JUDGE" && selectedEvidence.status === "VERIFIED" && (
+                    <div style={{ padding: '16px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                      <h4 style={{ color: 'var(--text-heading)' }}>Judge Verdict</h4>
+                      <div style={{ display: "flex", gap: "10px", marginTop: '12px' }}>
+                        <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
+                          approveEvidence(selectedEvidence._id, "APPROVED");
+                          setSelectedEvidence(null);
+                        }}>
+                          Approve
+                        </button>
+                        <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
+                          approveEvidence(selectedEvidence._id, "REJECTED");
+                          setSelectedEvidence(null);
+                        }}>
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="preview-box not-previewable" style={{ height: '100%', background: 'transparent', border: 'none', boxShadow: 'none' }}>
+                <p>Select an evidence item from the list to view details and perform actions.</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     );
   };
@@ -623,7 +663,7 @@ function App() {
 
     const navTabs = {
       LAWYER: ["CURRENT_CASES", "CLOSED_CASES", "PROFILE", "HELP_DESK"],
-      PROFESSIONAL: ["CURRENT_CASES", "CLOSED_CASES", "PROFILE", "HELP_DESK"],
+      PROFESSIONAL: ["CURRENT_CASES", "DEADLINES", "CLOSED_CASES", "PROFILE", "HELP_DESK"],
       JUDGE: ["CURRENT_CASES", "CLOSED_CASES", "CREATE_CASE", "EDIT_CASE", "PROFILE", "HELP_DESK"],
       PUBLIC: ["CURRENT_CASES", "CLOSED_CASES", "PROFILE", "DIRECTORY", "HELP_DESK"]
     };
@@ -632,6 +672,7 @@ function App() {
 
     const getTabLabel = (tab) => {
       if (tab === "CURRENT_CASES") return user.role === "PROFESSIONAL" ? "Assigned Cases" : "Current Cases";
+      if (tab === "DEADLINES") return "Forensic Deadlines";
       if (tab === "CLOSED_CASES") return "Closed Cases";
       if (tab === "CREATE_CASE") return "Create Case";
       if (tab === "EDIT_CASE") return "Edit Case";
@@ -652,7 +693,12 @@ function App() {
         </div>
 
         <div className="nav-search-container">
-          <span className="search-icon-nav">🔍</span>
+          <span className="search-icon-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-subtle)' }}>
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </span>
           <input
             type="text"
             className="nav-search-input"
@@ -762,37 +808,43 @@ function App() {
     );
   };
 
-  // filtered lists: by default hide CLOSED unless showClosed is true
-  const visibleCases = cases.filter(
-    c => showClosed || c.status !== "CLOSED"
-  );
+  // --- HELP DESK RENDER ---
 
   const renderHelpDesk = () => {
     const helpContent = {
       LAWYER: {
-        title: "Lawyer Help Desk",
+        title: "Advocate & Legal Counsel Help Desk",
         sections: [
-          { h: "Dashboard Overview", p: "Welcome to the E-JUST Lawyer Dashboard. Use the navbar to navigate between your active and closed cases." },
-          { h: "Evidence Management", p: "To upload or view evidence, first open a case from the list. The evidence section will appear below the case details." }
+          { h: "Dashboard & Navigation", p: "Your central hub lists all 'Current Cases' assigned to you. Use 'Closed Cases' to access historical archives." },
+          { h: "Evidence Submission", p: "Navigate to a specific Case Detail view. Use the 'Upload New Evidence' form to securely submit documents, images, or video files. All uploads are hashed for integrity." },
+          { h: "Evidence Tracking", p: "Monitor the status of your submissions. 'UPLOADED' means pending review, 'VERIFIED' means a Forensic Professional has validated it, and 'APPROVED' means the Judge has accepted it into the case record." },
+          { h: "Suggestion System", p: "You can suggest other Professionals or Public Viewers for a case via the suggestion feature inside the Case Details." }
         ]
       },
       PROFESSIONAL: {
-        title: "Professional Help Desk",
+        title: "Forensic & Technical Professional Help Desk",
         sections: [
-          { h: "Evidence Verification", p: "Review and verify evidence uploaded by lawyers." },
-          { h: "Deadline", p: "Verification must be completed 1 day before the next hearing session." }
+          { h: "Assignment Dashboard", p: "The 'Assigned Cases' tab displays cases requiring your expertise. The 'Forensic Deadlines' tab prioritizes cases with upcoming hearings." },
+          { h: "Evidence Verification Process", p: "Open a case and review the 'Evidence Repository'. Selected items allow you to download the original file. Use the 'Verify Evidence' form to submit your professional opinion and mark the file as 'VERIFIED' or 'REJECTED'." },
+          { h: "Deadlines & Hearings", p: "Your verification must be completed at least 24 hours before the 'Next Hearing' date. Use the 'Mark as Done' feature in the Deadlines tab to organize your workload." }
         ]
       },
       JUDGE: {
-        title: "Judge Help Desk",
+        title: "Judicial Authority Help Desk",
         sections: [
-          { h: "Case Management", p: "Use 'Create Case' to start a new trial. 'Current Cases' handles ongoing trials and verdicts." }
+          { h: "Case Initiation", p: "Use the 'Create Case' tab to initialize new legal proceedings. You must assign a Case Number, Title, and initial Legal Counsel." },
+          { h: "Case Management Console", p: "Inside a Case Detail view, the 'Management' tab gives you control over the case lifecycle. You can update the 'Next Hearing Date', issue a 'Verdict/Progress Update', or Close/Re-open the case." },
+          { h: "Evidence Admissibility", p: "Review evidence that has been 'VERIFIED' by professionals. You have the final authority to 'APPROVE' (admit to court records) or 'REJECT' evidence." },
+          { h: "Assignment Control", p: "Use the 'Edit Case' tab to modify the roster of assigned Lawyers, Professionals, and authorized Public Viewers." }
         ]
       },
       PUBLIC: {
-        title: "Public Help Desk",
+        title: "Public Information Portal Help Desk",
         sections: [
-          { h: "Public Access", p: "View status and hearing dates of ongoing and closed cases. Limited details are shown for privacy." }
+          { h: "Transparency & Access", p: "This portal provides transparency into the judicial process. You can view 'Current' and 'Closed' cases that are marked for public interest." },
+          { h: "Privacy Restrictions", p: "Sensitive details, raw evidence files, and personal contact information of involved parties are redacted to protect privacy and case integrity." },
+          { h: "Judiciary Directory", p: "Use the 'Judiciary Directory' to verify the credentials and profiles of registered Judges, Lawyers, and official Court Professionals." },
+          { h: "Case Statutes", p: "A 'Closed' case indicates a final verdict has been reached. An 'Open' case is currently in active litigation or review." }
         ]
       }
     };
@@ -802,13 +854,17 @@ function App() {
     return (
       <div className="card">
         <h3>{content.title}</h3>
-        <div className="help-content">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '30px', marginTop: '20px' }}>
           {content.sections.map((s, i) => (
             <div key={i}>
-              <h4>{s.h}</h4>
-              <p>{s.p}</p>
+              <h4 style={{ color: 'var(--primary)', marginBottom: '10px', borderBottom: '1px solid var(--border-muted)', paddingBottom: '8px' }}>{s.h}</h4>
+              <p style={{ lineHeight: '1.6', color: 'var(--text-subtle)' }}>{s.p}</p>
             </div>
           ))}
+        </div>
+        <div style={{ marginTop: '30px', padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+          <h4 style={{ margin: '0 0 10px 0' }}>Need Technical Support?</h4>
+          <p className="meta">Contact the E-JUST IT Administration at <strong>support@ejust.gov.in</strong> for account issues or technical bug reports.</p>
         </div>
       </div>
     );
@@ -824,18 +880,18 @@ function App() {
 
     return (
       <div className="card">
-        <div className="card-header-row" style={{ marginBottom: '20px' }}>
-          <h3>{listTitle} ({searchFiltered.length})</h3>
+        <div className="card-header-row" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0 }}>{listTitle} ({searchFiltered.length})</h3>
           <button className="btn btn-secondary btn-sm" onClick={fetchCases}>Refresh List</button>
         </div>
-        <ul className="list">
+        <ul className="list" style={{ listStyle: 'none', padding: 0 }}>
           {searchFiltered.map(c => (
-            <li key={c._id} className="list-item" style={{ padding: '15px' }}>
-              <div style={{ flex: 1 }}>
+            <li key={c._id} className="list-item" style={{ padding: '20px', marginBottom: '24px', border: '1px solid var(--border-muted)', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.01)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ flex: 1, paddingRight: '20px' }}>
                 <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{c.caseNumber} — {c.title}</div>
                 <div className="meta" style={{ marginTop: '5px' }}>
                   <span className={`status-pill status-${c.status.toLowerCase()}`}>{c.status}</span>
-                  {c.nextHearingDate && !isClosed && ` • Next Hearing: ${new Date(c.nextHearingDate).toLocaleDateString()}`}
+                  {c.nextHearingDate && !isClosed && ` • Next Hearing: ${formatDate(c.nextHearingDate)}`}
                 </div>
               </div>
               <button
@@ -855,6 +911,90 @@ function App() {
           ))}
           {searchFiltered.length === 0 && <p className="meta" style={{ textAlign: 'center', padding: '20px' }}>No cases found matching your criteria.</p>}
         </ul>
+      </div>
+    );
+  };
+
+  const renderDeadlinesView = () => {
+    // 1. Filter active cases with future hearings
+    const pendingCases = cases.filter(c => c.status !== 'CLOSED' && c.nextHearingDate);
+
+    // 2. Map to add 'deadline' property (1 day before hearing)
+    const deadlineData = pendingCases.map(c => {
+      const hearing = new Date(c.nextHearingDate);
+      const deadline = new Date(hearing);
+      deadline.setDate(hearing.getDate() - 1);
+
+      const now = new Date();
+      const timeDiff = deadline - now;
+      const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
+      const completionKey = `${c._id}_${c.nextHearingDate}`;
+
+      return { ...c, deadline, daysLeft, completionKey };
+    }).filter(c => !completedDeadlines.includes(c.completionKey)); // Exclude marked as done
+
+    // 3. Sort by deadline (closest first)
+    deadlineData.sort((a, b) => a.deadline - b.deadline);
+
+    const markAsDone = (completionKey) => {
+      const updated = [...completedDeadlines, completionKey];
+      setCompletedDeadlines(updated);
+      localStorage.setItem("completedDeadlines", JSON.stringify(updated));
+    };
+
+    return (
+      <div className="card">
+        <h3 style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-muted)', paddingBottom: '15px' }}>
+          Evidence Submission Deadlines
+        </h3>
+
+        <div className="list">
+          {deadlineData.map(c => {
+            const isUrgent = c.daysLeft <= 2;
+            const isToday = c.daysLeft <= 0;
+
+            return (
+              <div key={c._id} className="list-item" style={{ padding: '20px', borderLeft: isUrgent ? '4px solid #ef4444' : '4px solid #3b82f6', background: isUrgent ? 'rgba(239, 68, 68, 0.05)' : 'transparent', marginBottom: '12px', borderRadius: '4px' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'var(--text-heading)' }}>{c.caseNumber}</span>
+                    <span className={`status-pill ${isUrgent ? 'status-rejected' : 'status-open'}`}>
+                      {isToday ? "DUE TODAY" : (c.daysLeft < 0 ? "OVERDUE" : `${c.daysLeft} Days Left`)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '1rem', marginBottom: '8px' }}>{c.title}</div>
+
+                  <div className="meta" style={{ display: 'flex', gap: '20px', fontSize: '0.9rem', color: 'var(--text-subtle)' }}>
+                    <div>📅 Hearing: {formatDate(c.nextHearingDate)}</div>
+                    <div style={{ color: isUrgent ? '#ef4444' : 'var(--primary)', fontWeight: 'bold' }}>
+                      🚨 Verification Deadline: {formatDate(c.deadline)}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <button className="btn btn-primary btn-sm" onClick={() => {
+                    setSelectedCaseId(c._id);
+                    setActiveTab("CURRENT_CASES"); // Redirect via Assigned/Current tab
+                  }}>
+                    Open Case
+                  </button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => markAsDone(c.completionKey)} title="Hide this deadline from list">
+                    Mark as Done
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {deadlineData.length === 0 && (
+            <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-subtle)' }}>
+              <p style={{ fontSize: '2rem', marginBottom: '10px' }}>✅</p>
+              No pending deadlines found.<br />
+              <span style={{ fontSize: '0.8rem' }}>(Cases marked as 'Done' are hidden)</span>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -1105,50 +1245,101 @@ function App() {
 
   if (!token) {
     return (
-      <div className="login-page" style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#131921',
-        padding: '20px'
-      }}>
-        <div className="card" style={{ maxWidth: '450px', width: '100%', padding: '40px' }}>
-          <h2 style={{ textAlign: "center", marginBottom: "30px", fontSize: "2rem", color: '#131921' }}>
-            ⚖️ E-JUST
-          </h2>
-          {message && <div className="status status-info" style={{ marginBottom: "20px" }}>{message}</div>}
-          <form onSubmit={handleLogin}>
-            <div className="form-group" style={{ marginBottom: '20px' }}>
-              <label className="form-label">Email</label>
-              <input
-                type="email"
-                className="input"
-                style={{ height: '45px' }}
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                required
-                placeholder="Enter your email"
-              />
+      <div className="login-ref-page">
+        {/* Animated Background Elements */}
+        <div className="blob-shape blob-1"></div>
+        <div className="blob-shape blob-2"></div>
+        <div className="blob-shape blob-3"></div>
+
+        <div className="login-ref-card">
+          {/* Logo and Header */}
+          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+            <div className="brand-icon-container" style={{ marginBottom: '20px' }}>
+              <div className="brand-icon-glow"></div>
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#eab308" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'relative', zIndex: 10 }}>
+                <path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
+                <path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
+                <path d="M7 21h10" />
+                <path d="M12 3v18" />
+                <path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" />
+              </svg>
             </div>
-            <div className="form-group" style={{ marginBottom: '30px' }}>
-              <label className="form-label">Password</label>
-              <input
-                type="password"
-                className="input"
-                style={{ height: '45px' }}
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                required
-                placeholder="••••••••"
-              />
+
+            <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#fff', margin: '0 0 8px 0', letterSpacing: '-1px' }}>
+              E-JUST
+            </h1>
+
+            <p style={{ fontSize: '0.8rem', color: 'var(--primary)', letterSpacing: '2px', textTransform: 'uppercase', fontWeight: 700 }}>
+              Judicial Management System
+            </p>
+          </div>
+
+          {message && (
+            <div className="status status-info" style={{ marginBottom: "25px", background: 'rgba(59, 130, 246, 0.1)', borderLeft: '4px solid var(--primary)' }}>
+              {message}
             </div>
-            <button className="btn btn-primary" type="submit" style={{ width: "100%", height: "45px", fontSize: "1rem", background: '#f0c14b', color: '#111', border: '1px solid #a88734' }}>
-              Sign In
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {/* Email Field */}
+            <div className="login-ref-input-wrapper">
+              <label className="login-ref-label">Official Email</label>
+              <div style={{ position: 'relative' }}>
+                <span className="login-ref-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect width="20" height="16" x="2" y="4" rx="2" />
+                    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                  </svg>
+                </span>
+                <input
+                  type="email"
+                  className="login-ref-input"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  required
+                  placeholder="officer@ejust.gov.in"
+                />
+              </div>
+            </div>
+
+            {/* Password Field */}
+            <div className="login-ref-input-wrapper">
+              <label className="login-ref-label">Secure Password</label>
+              <div style={{ position: 'relative' }}>
+                <span className="login-ref-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 0 0 1 10 0v4" />
+                  </svg>
+                </span>
+                <input
+                  type="password"
+                  className="login-ref-input"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  required
+                  placeholder="••••••••••••"
+                />
+              </div>
+            </div>
+
+            {/* Submit Button */}
+            <button type="submit" className="login-ref-btn">
+              <span>Access Secure Portal</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+              </svg>
             </button>
           </form>
-          <div className="meta" style={{ textAlign: "center", marginTop: "30px", borderTop: '1px solid #eee', paddingTop: '20px' }}>
-            Secured Legal Infrastructure
+
+          {/* Footer Notice */}
+          <div style={{ marginTop: '32px', pt: '24px', borderTop: '1px solid rgba(255,255,255,0.1)', textAlign: 'center' }}>
+            <p style={{ fontSize: '0.75rem', color: '#64748b', lineHeight: 1.6, marginTop: '20px' }}>
+              Restricted Access. Unauthorized attempts are logged.
+              <br />
+              Government Integration Standard v3.0
+            </p>
           </div>
         </div>
       </div>
@@ -1158,22 +1349,18 @@ function App() {
   const selectedCase = cases.find(c => c._id === selectedCaseId);
 
   return (
-    <div className="app-root-container">
+    <div className={`app-root-container theme-${(user?.role || 'public').toLowerCase()}`}>
       {renderNavbar()}
       {renderMobileSidebar()}
 
-      <main className="app-root">
+      <main className={`app-root ${selectedCaseId ? 'edge-to-edge' : ''}`}>
         <div className="app-container">
-          {message && (
-            <div className="status status-info" style={{ marginBottom: '20px' }}>
-              <b>System Notice:</b> {message}
-            </div>
-          )}
 
           {/* MAIN NAVIGATION ROUTING */}
           {activeTab === 'PROFILE' && renderProfileView()}
           {activeTab === 'HELP_DESK' && renderHelpDesk()}
           {activeTab === 'DIRECTORY' && renderDirectoryView()}
+          {activeTab === 'DEADLINES' && renderDeadlinesView()}
 
           {/* CASE LISTING */}
           {(activeTab === 'CURRENT_CASES' || activeTab === 'CLOSED_CASES') && !selectedCaseId && (
@@ -1248,8 +1435,8 @@ function App() {
                   <h3>Select Case to Edit Assignments</h3>
                   <ul className="list">
                     {cases.filter(c => c.status !== 'CLOSED').map(c => (
-                      <li key={c._id} className="list-item">
-                        {c.caseNumber} - {c.title}
+                      <li key={c._id} className="list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', marginBottom: '24px', border: '1px solid var(--border-muted)', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.01)' }}>
+                        <span style={{ fontWeight: 'bold' }}>{c.caseNumber} - {c.title}</span>
                         <button className="btn btn-secondary btn-sm" onClick={() => {
                           setEditCaseId(c._id);
                           setSelectedLawyers(c.assignedLawyers?.map(l => l._id || l) || []);
@@ -1286,139 +1473,205 @@ function App() {
             </div>
           )}
 
-          {/* SINGLE CASE DETAIL VIEW (UNIFIED) */}
+          {/* SINGLE CASE DETAIL VIEW (SIDEBAR LAYOUT) */}
+          {/* SINGLE CASE DETAIL VIEW (SIDEBAR LAYOUT - DASHBOARD MODE) */}
           {selectedCaseId && (activeTab === 'CURRENT_CASES' || activeTab === 'CLOSED_CASES') && selectedCase && (
-            <div className="case-details-layout" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <div className="card">
-                <button className="btn btn-secondary btn-sm" style={{ marginBottom: '15px' }} onClick={() => setSelectedCaseId("")}>
-                  &larr; Back to Case List
-                </button>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                  <div>
-                    <h2 style={{ margin: 0 }}>{selectedCase.title}</h2>
-                    <p className="meta" style={{ fontSize: '1rem' }}>{selectedCase.caseNumber} • <span className={`status-pill status-${selectedCase.status.toLowerCase()}`}>{selectedCase.status}</span></p>
+            <div className="case-details-layout" style={{ display: 'flex', flexDirection: 'row', gap: '0', height: '100%', overflow: 'hidden' }}>
+
+              {/* LEFT SIDEBAR NAVIGATION (Direct Layout Child) */}
+              {user.role === 'JUDGE' && (
+                <div className="case-detail-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <h4 className="meta" style={{ padding: '20px 20px 10px', margin: 0 }}>CASE NAVIGATION</h4>
+
+                  <button
+                    className={`sidebar-btn ${activeSubTab === 'DETAILS' ? 'active' : ''}`}
+                    onClick={() => { setActiveSubTab('DETAILS'); setSelectedEvidence(null); }}
+                  >
+                    Case Details
+                  </button>
+
+                  <button
+                    className={`sidebar-btn ${activeSubTab === 'EVIDENCE' ? 'active' : ''}`}
+                    onClick={() => { setActiveSubTab('EVIDENCE'); setSelectedEvidence(null); }}
+                  >
+                    Evidence Repository
+                  </button>
+
+                  <button
+                    className={`sidebar-btn ${activeSubTab === 'MANAGEMENT' ? 'active' : ''}`}
+                    onClick={() => { setActiveSubTab('MANAGEMENT'); setSelectedEvidence(null); }}
+                  >
+                    Management
+                  </button>
+
+                  <div style={{ marginTop: 'auto', padding: '20px' }}>
+                    <button className="btn btn-secondary btn-sm" style={{ width: '100%' }} onClick={() => setSelectedCaseId("")}>
+                      &larr; Exit Case
+                    </button>
                   </div>
                 </div>
+              )}
 
-                <div style={{ marginTop: '20px' }}>
-                  <h4>Description</h4>
-                  <p>{selectedCase.description}</p>
-                </div>
+              {/* MAIN CONTENT AREA */}
+              <div className="case-main-content" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
-                <div style={{ marginTop: '20px', display: 'flex', gap: '40px', flexWrap: 'wrap', borderTop: '1px solid #e5e7eb', paddingTop: '20px' }}>
-                  <div>
-                    <h4 className="meta" style={{ marginBottom: '8px', color: '#64748b' }}>ASSIGNED JUDGE</h4>
-                    {selectedCase.assignedJudge ? (
-                      <div className="status-pill status-approved" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '6px 14px' }}>
-                        ⚖️ {selectedCase.assignedJudge.name || "N/A"}
-                      </div>
-                    ) : (
-                      <span className="meta">No judge assigned yet.</span>
+                {/* FLOATING CONTEXT HEADER */}
+                <div className="case-floating-header">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '1.1rem' }}>
+                      <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#fff' }}>{selectedCase.title}</h2>
+                      <span style={{ color: 'var(--border-muted)', fontSize: '1.5rem', fontWeight: 300 }}>|</span>
+                      <span style={{ fontFamily: 'monospace', color: 'var(--text-subtle)' }}>{selectedCase.caseNumber}</span>
+                      <span style={{ color: 'var(--border-muted)', fontSize: '1.5rem', fontWeight: 300 }}>|</span>
+                      <span className={`status-pill status-${selectedCase.status.toLowerCase()}`}>{selectedCase.status}</span>
+                    </div>
+
+                    {user.role !== 'JUDGE' && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => setSelectedCaseId("")}>
+                        &larr; Back to Cases
+                      </button>
                     )}
                   </div>
-                  <div>
-                    <h4 className="meta" style={{ marginBottom: '8px', color: '#64748b' }}>LEGAL COUNSEL (LAWYERS)</h4>
-                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                      {selectedCase.assignedLawyers && selectedCase.assignedLawyers.length > 0 ? (
-                        selectedCase.assignedLawyers.map(l => (
-                          <div key={l._id} className="status-pill status-verified" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '6px 14px' }}>
-                            🎓 {l.name}
-                          </div>
-                        ))
-                      ) : (
-                        <span className="meta">No lawyers assigned yet.</span>
-                      )}
-                    </div>
-                  </div>
                 </div>
 
-                {selectedCase.status === 'CLOSED' && (
-                  <div style={{ marginTop: '20px', padding: '24px', background: '#f8fafc', borderLeft: '4px solid #3b82f6', borderRadius: '8px' }}>
-                    <h3 style={{ color: '#1e3a8a', marginBottom: '12px' }}>⚖️ FINAL JUDGEMENT</h3>
-                    <div style={{ fontSize: '1.2rem', lineHeight: '1.7', color: '#334155' }}>
-                      {selectedCase.verdictText || "No final verdict recorded."}
-                    </div>
-                    <div className="meta" style={{ marginTop: '15px' }}>
-                      Case Closed on: {selectedCase.closedAt ? new Date(selectedCase.closedAt).toLocaleDateString() : "N/A"}
-                    </div>
-                  </div>
-                )}
-              </div>
+                {/* SCROLLABLE VIEWPORT FOR TABS (Overflow Hidden to delegate scrolling to tabs) */}
+                <div className="case-tab-viewport" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
-              {/* ACTION AREA (ROLE BASED) */}
-              <div className="case-details-grid">
-                {/* LEFT: EVIDENCE & PROGRESSION */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  {/* PUBLIC see only progression, others see both */}
-                  {renderCaseTimeline(selectedCase)}
-
-                  {user.role !== 'PUBLIC' && (
-                    <>
-                      {user.role === 'LAWYER' && selectedCase.status !== 'CLOSED' && (
+                  {/* TAB: DETAILS (Info + Progress) */}
+                  {(activeSubTab === 'DETAILS' || user.role !== 'JUDGE') && (
+                    <div className="scrollable-tab-content" style={{ height: '100%', overflowY: 'auto' }}>
+                      <div className="content-padded">
                         <div className="card">
-                          <h3>Upload New Evidence</h3>
-                          <form onSubmit={uploadEvidence}>
-                            <div className="form-group">
-                              <label className="form-label">Evidence Title</label>
-                              <input className="input" value={evidenceDisplayName} onChange={e => setEvidenceDisplayName(e.target.value)} placeholder="Descriptive name..." />
+                          <div style={{ marginTop: '0px' }}>
+                            <h4>Description</h4>
+                            <p>{selectedCase.description}</p>
+                          </div>
+
+                          <div style={{ marginTop: '20px', display: 'flex', gap: '40px', flexWrap: 'wrap', borderTop: '1px solid #e5e7eb', paddingTop: '20px' }}>
+                            <div>
+                              <h4 className="meta" style={{ marginBottom: '8px', color: '#64748b' }}>ASSIGNED JUDGE</h4>
+                              {selectedCase.assignedJudge ? (
+                                <div className="status-pill status-approved" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '6px 14px' }}>
+                                  ⚖️ {selectedCase.assignedJudge.name || "N/A"}
+                                </div>
+                              ) : (
+                                <span className="meta">No judge assigned yet.</span>
+                              )}
                             </div>
+                            <div>
+                              <h4 className="meta" style={{ marginBottom: '8px', color: '#64748b' }}>LEGAL COUNSEL (LAWYERS)</h4>
+                              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                {selectedCase.assignedLawyers && selectedCase.assignedLawyers.length > 0 ? (
+                                  selectedCase.assignedLawyers.map(l => (
+                                    <div key={l._id} className="status-pill status-verified" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '6px 14px' }}>
+                                      🎓 {l.name}
+                                    </div>
+                                  ))
+                                ) : (
+                                  <span className="meta">No lawyers assigned yet.</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {selectedCase.status === 'CLOSED' && (
+                            <div style={{ marginTop: '20px', padding: '24px', background: 'rgba(59, 130, 246, 0.05)', borderLeft: '4px solid #3b82f6', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.1)', borderLeftWidth: '4px' }}>
+                              <h3 style={{ color: '#60a5fa', marginBottom: '12px', fontSize: '1.1rem' }}>⚖️ FINAL JUDGEMENT</h3>
+                              <div style={{ fontSize: '1.2rem', lineHeight: '1.7', color: 'var(--text-heading)' }}>
+                                {selectedCase.verdictText || "No final verdict recorded."}
+                              </div>
+                              <div className="meta" style={{ marginTop: '15px' }}>
+                                Case Closed on: {formatDate(selectedCase.closedAt)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Timeline is always part of details */}
+                        {renderCaseTimeline(selectedCase)}
+
+                        {user.role !== 'JUDGE' && user.role !== 'PUBLIC' && user.role === 'LAWYER' && selectedCase.status !== 'CLOSED' && (
+                          <div className="card" style={{ width: '100%', maxWidth: 'none' }}>
+                            <h3>Upload New Evidence</h3>
+                            <form onSubmit={uploadEvidence}>
+                              <div className="form-group">
+                                <label className="form-label">Evidence Title</label>
+                                <input className="input" value={evidenceDisplayName} onChange={e => setEvidenceDisplayName(e.target.value)} placeholder="Descriptive name..." />
+                              </div>
+                              <div className="form-group">
+                                <label className="form-label">Category</label>
+                                <select className="select" value={evidenceCategory} onChange={e => setEvidenceCategory(e.target.value)}>
+                                  <option value="DOCUMENT">Document</option>
+                                  <option value="IMAGE">Image</option>
+                                  <option value="VIDEO">Video</option>
+                                  <option value="OTHER">Other</option>
+                                </select>
+                              </div>
+                              <div className="form-group">
+                                <input type="file" onChange={e => setEvidenceFile(e.target.files[0])} />
+                              </div>
+                              <button className="btn btn-primary" type="submit" style={{ width: '100%' }}>Upload File</button>
+                            </form>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* EVIDENCE LIST FOR NON-JUDGES (Edge-to-Edge, outside padded div) */}
+                      {user.role !== 'JUDGE' && user.role !== 'PUBLIC' && (
+                        <div style={{ height: '500px', borderTop: '1px solid var(--border-muted)' }}>
+                          {renderGroupedEvidenceList(true, user.role, selectedCase.status === 'CLOSED')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB: EVIDENCE (JUDGE ONLY via Sidebar) */}
+                  {activeSubTab === 'EVIDENCE' && user.role === 'JUDGE' && (
+                    <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+                      {renderGroupedEvidenceList(true, user.role, selectedCase.status === 'CLOSED')}
+                    </div>
+                  )}
+
+                  {/* TAB: MANAGEMENT (JUDGE ONLY) */}
+                  {activeSubTab === 'MANAGEMENT' && user.role === 'JUDGE' && (
+                    <div className="scrollable-tab-content" style={{ height: '100%', overflowY: 'auto' }}>
+                      <div className="content-padded">
+                        <div className="card" style={{ height: 'fit-content', border: '2px solid #3b82f6' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+                            <span style={{ fontSize: '1.5rem' }}>⚖️</span>
+                            <h3 style={{ margin: 0 }}>Management Console</h3>
+                          </div>
+
+                          <form onSubmit={submitVerdict}>
                             <div className="form-group">
-                              <label className="form-label">Category</label>
-                              <select className="select" value={evidenceCategory} onChange={e => setEvidenceCategory(e.target.value)}>
-                                <option value="DOCUMENT">Document</option>
-                                <option value="IMAGE">Image</option>
-                                <option value="VIDEO">Video</option>
-                                <option value="OTHER">Other</option>
+                              <label className="form-label">Step/Verdict Description</label>
+                              <textarea className="textarea" style={{ minHeight: '120px' }} value={verdictText} onChange={e => setVerdictText(e.target.value)} placeholder="Describe the current progression or final judgement..." />
+                            </div>
+
+                            <div className="form-group">
+                              <label className="form-label">Case Status</label>
+                              <select className="select" value={verdictStatus} onChange={e => setVerdictStatus(e.target.value)}>
+                                <option value="OPEN">Open / Active</option>
+                                <option value="CLOSED">Closed / Finalized</option>
                               </select>
                             </div>
-                            <div className="form-group">
-                              <input type="file" onChange={e => setEvidenceFile(e.target.files[0])} />
-                            </div>
-                            <button className="btn btn-primary" type="submit">Upload File</button>
+
+                            <button className="btn btn-primary" type="submit" style={{ width: '100%' }}>
+                              {verdictStatus === 'CLOSED' ? (selectedCase.status === 'CLOSED' ? 'Update Final Verdict' : 'Issue Final Verdict & Close Case') : (selectedCase.status === 'CLOSED' ? 'Re-open Case' : 'Record Progress Update')}
+                            </button>
                           </form>
                         </div>
-                      )}
-                      {renderGroupedEvidenceList(true, user.role, selectedCase.status === 'CLOSED')}
-                    </>
-                  )}
-                </div>
-
-                {/* RIGHT: CASE MANAGEMENT (JUDGE ONLY) */}
-                {user.role === 'JUDGE' && (
-                  <div className="card" style={{ height: 'fit-content', border: '2px solid #3b82f6' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
-                      <span style={{ fontSize: '1.5rem' }}>⚖️</span>
-                      <h3 style={{ margin: 0 }}>Management Console</h3>
-                    </div>
-                    {selectedCase.status !== 'CLOSED' ? (
-                      <form onSubmit={submitVerdict}>
-                        <div className="form-group">
-                          <label className="form-label">Step/Verdict Description</label>
-                          <textarea className="textarea" style={{ minHeight: '120px' }} value={verdictText} onChange={e => setVerdictText(e.target.value)} placeholder="Describe the current progression or final judgement..." />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Next Hearing Date (Optional)</label>
-                          <input type="datetime-local" className="input" value={nextHearingDate} onChange={e => setNextHearingDate(e.target.value)} />
-                        </div>
-                        <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', background: '#fff1f2', borderRadius: '8px', border: '1px solid #fecaca' }}>
-                          <input type="checkbox" checked={closeCase} onChange={e => setCloseCase(e.target.checked)} id="close-case" />
-                          <label htmlFor="close-case" style={{ fontWeight: '800', color: '#be123c', fontSize: '0.9rem' }}>FINALIZE & CLOSE CASE</label>
-                        </div>
-                        <button className="btn btn-primary" type="submit" style={{ width: '100%', fontWeight: 'bold' }}>Update Case Progression</button>
-                      </form>
-                    ) : (
-                      <div className="status status-info" style={{ border: 'none', background: '#f8fafc' }}>
-                        <b>CASE ARCHIVED</b><br />No further management required.
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
+
+                </div>
               </div>
             </div>
           )}
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   );
 }
 

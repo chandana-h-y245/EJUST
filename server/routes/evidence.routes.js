@@ -43,18 +43,21 @@ router.get("/by-case/:caseId", authRequired, async (req, res, next) => {
   }
 });
 
-// PATCH verify evidence (Professional) - Supports Comments
+// PATCH verify evidence (Professional) - Supports Comments and Rejection
 router.patch("/:id/verify", authRequired, allowRoles("PROFESSIONAL"), async (req, res, next) => {
   try {
-    console.log(`[DEBUG] Verifying evidence ID: ${req.params.id} by user: ${req.user.id}`);
+    const { comments, decision } = req.body;
+    const finalDecision = decision === "REJECTED" ? "REJECTED" : "VERIFIED";
+
+    console.log(`[DEBUG] Verifying evidence ID: ${req.params.id} by user: ${req.user.id} with decision: ${finalDecision}`);
     const evidence = await Evidence.findById(req.params.id);
     if (!evidence) {
       console.log(`[DEBUG] Evidence NOT FOUND in DB for ID: ${req.params.id}`);
       return res.status(404).json({ message: "Evidence not found in database" });
     }
 
-    evidence.status = "VERIFIED";
-    evidence.professionalComments = req.body.comments || "";
+    evidence.status = finalDecision;
+    evidence.professionalComments = comments || "";
     await evidence.save();
     res.json(evidence);
   } catch (err) {

@@ -155,7 +155,14 @@ router.patch(
         update.nextHearingDate = new Date(nextHearingDate);
       }
 
-      if (closeCase === true) {
+      if (req.body.status) {
+        update.status = req.body.status;
+        if (update.status === "CLOSED") {
+          update.closedAt = new Date();
+        } else if (update.status === "OPEN") {
+          update.closedAt = null; // Re-opening
+        }
+      } else if (closeCase === true) {
         update.status = "CLOSED";
         update.closedAt = new Date();
       }
