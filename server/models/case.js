@@ -25,6 +25,13 @@ const caseSchema = new mongoose.Schema(
       },
     ],
 
+    assignedLawyers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Auth",
+      },
+    ],
+
     assignedPublicViewers: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -41,6 +48,29 @@ const caseSchema = new mongoose.Schema(
     verdictText: { type: String },       // judge’s final verdict/notes
     nextHearingDate: { type: Date },     // next session visible to all
     closedAt: { type: Date },            // when case was closed
+
+    timeline: [
+      {
+        date: { type: Date, default: Date.now },
+        status: String,
+        verdict: String,
+        nextHearing: Date,
+      }
+    ],
+
+    suggestions: [
+      {
+        suggestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Auth" },
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "Auth" },
+        role: { type: String, enum: ["PROFESSIONAL", "PUBLIC"] },
+        status: {
+          type: String,
+          enum: ["PENDING", "APPROVED", "REJECTED"],
+          default: "PENDING",
+        },
+        date: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

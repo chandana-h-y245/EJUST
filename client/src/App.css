@@ -2,8 +2,10 @@
 body {
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background: #020617; /* very dark */
-  color: #e2e8f0;      /* light text */
+  background: #020617;
+  /* very dark */
+  color: #e2e8f0;
+  /* light text */
 }
 
 .app-container {
@@ -263,7 +265,8 @@ input:-webkit-autofill {
 
 /* Case list items (remove white background) */
 .list-item {
-  background: #020617;          /* dark */
+  background: #020617;
+  /* dark */
   border-radius: 10px;
   border: 1px solid #1f2937;
   padding: 10px 12px;
@@ -282,4 +285,112 @@ input:-webkit-autofill {
   background: #0b1220;
   border-radius: 12px;
   border: 1px solid #1f2937;
+}
+
+/* Lawyer Dashboard Layout */
+.lawyer-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Taskbar Styling */
+.lawyer-taskbar {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  background: #0b1220;
+  padding: 12px 20px;
+  box-sizing: border-box;
+  /* Ensure padding doesn't overflow width */
+}
+
+.lawyer-taskbar h3 {
+  margin: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+  font-size: 1.1rem;
+  color: #60a5fa;
+}
+
+.taskbar-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.lawyer-taskbar .btn {
+  text-align: center;
+  padding: 8px 16px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.lawyer-taskbar .btn-secondary {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+}
+
+.lawyer-taskbar .btn-secondary:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.lawyer-taskbar .btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #2563eb;
+  font-weight: 600;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Checkbox Group for Multi-select */
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+  background: #020617;
+  border: 1px solid #1f2937;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+/* Help Desk Content Styling */
+.help-content h4 {
+  color: #cbd5e1;
+  margin-top: 20px;
+  margin-bottom: 8px;
+  font-size: 1rem;
+}
+
+.help-content p {
+  color: #94a3b8;
+  line-height: 1.6;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+
+.help-content strong {
+  color: #e2e8f0;
 }

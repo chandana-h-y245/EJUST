@@ -38,8 +38,7 @@ app.use("/api/cases", caseRoutes);
 app.use("/api/evidences", evidenceRoutes);
 app.use("/api/users", userRoutes);
 
-// static files for uploaded evidence
-app.use("/api/evidences", require("./routes/evidence.routes"));
+// static files for uploaded evidence are handled at line 25
 
 // DB connect
 console.log("MONGO_URI is:", process.env.MONGO_URI);
@@ -61,6 +60,12 @@ app.use((err, req, res, next) => {
     message: "Server error",
     error: err && err.message ? err.message : String(err),
   });
+});
+
+// Catch-all 404 for debugging
+app.use((req, res) => {
+  console.log(`[404 DEBUG] Not Found: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
 });
 
 const PORT = process.env.PORT || 5000;

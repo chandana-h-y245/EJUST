@@ -14,6 +14,13 @@ const authSchema = new mongoose.Schema(
     },
     active: { type: Boolean, default: true },
     refreshToken: [String],
+
+    // Profile Fields
+    profilePicture: { type: String },
+    experience: { type: String },
+    education: { type: String },
+    governmentIdType: { type: String },
+    governmentIdNumber: { type: String },
   },
   { timestamps: true }
 );
